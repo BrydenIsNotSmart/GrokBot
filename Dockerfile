@@ -38,10 +38,11 @@ COPY --from=install --chown=grokbot:grokbot /temp/prod/node_modules node_modules
 
 # Copy application code + migrations
 COPY --from=prerelease --chown=grokbot:grokbot /app/src ./src
-COPY --from=prerelease --chown=grokbot:grokbot /app/drizzle ./drizzle
+COPY --from=prerelease --chown=grokbot:grokbot /app/migrations ./migrations
 COPY --from=prerelease --chown=grokbot:grokbot /app/package.json ./
 COPY --from=prerelease --chown=grokbot:grokbot /app/tsconfig.json ./
 COPY --from=prerelease --chown=grokbot:grokbot /app/drizzle.config.ts ./
+
 
 # Switch to non-root user
 USER grokbot
