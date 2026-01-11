@@ -150,7 +150,10 @@ async function sendChunkedMessage(
     await initial.edit(chunks.shift()!);
   }
   for (const chunk of chunks) {
-    if ('send' in message.channel && typeof message.channel.send === 'function') {
+    if (
+      "send" in message.channel &&
+      typeof message.channel.send === "function"
+    ) {
       await message.channel.send(chunk);
       await new Promise((r) => setTimeout(r, CHUNK_DELAY_MS));
     }
@@ -171,7 +174,20 @@ export default {
       message.content.startsWith(`<@${botId}>`) ||
       message.content.startsWith(`<@!${botId}>`);
 
-    if (!mentioned && !message.reference?.messageId) return;
+    let isReplyToBot = false;
+
+    if (message.reference?.messageId) {
+      try {
+        const referenced = await message.channel.messages.fetch(
+          message.reference.messageId,
+        );
+        isReplyToBot = referenced.author.id === botId;
+      } catch {
+        isReplyToBot = false;
+      }
+    }
+
+    if (!mentioned && !isReplyToBot) return;
 
     const prompt = message.content.replace(/^<@!?(\d+)>/, "").trim();
     if (!prompt && !message.attachments.size) {
