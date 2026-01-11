@@ -1,117 +1,236 @@
-import { Client, Events, Message, Attachment } from "discord.js";
+import { Client, Events, Message } from "discord.js";
 import { xai } from "@ai-sdk/xai";
-import { generateText } from "ai";
+import { streamText } from "ai";
+import { checkRateLimit, recordPromptUsage } from "../utils/rateLimit";
+import { getUserModel, isReasoningModel } from "../utils/models";
+
+/* ---------------------------------- Types --------------------------------- */
+
+interface MessageContent {
+  type: "text";
+  text: string;
+}
+
+/* -------------------------------- Constants -------------------------------- */
+
+const INSTRUCTIONS = `You are Grok, the AI by xAI. You are reading messages in Discord channels.
+All information comes from Discord messages, including image attachments (which you cannot see but are provided as URLs and descriptions).
+You are replying in Discord and may use all Discord features: Markdown, code blocks, inline code, mentions, links, emojis.
+If there are images, reference them in your response using the description or URL, and if you cannot fully interpret them, ask the user for a description.
+Be aware that Discord messages must be 2000 characters or fewer. Shorten or summarize if necessary.
+
+You have access to rich context about:
+- The server/guild you're in
+- The channel you're in
+- Users (roles, join date, account age)
+- Recent conversation history`;
+
+const MAX_CONTEXT_LENGTH = 500;
+const MESSAGE_CHUNK_SIZE = 2000;
+const CHUNK_DELAY_MS = 150;
+
+/* -------------------------------- Utilities -------------------------------- */
+
+function flattenContent(content: MessageContent[]): string {
+  return content.map((c) => c.text).join("\n");
+}
+
+function extractImageAttachments(msg: Message): MessageContent[] {
+  const images: MessageContent[] = [];
+  const authorName = msg.member?.nickname || msg.author.username;
+
+  for (const attachment of msg.attachments.values()) {
+    if (attachment.contentType?.startsWith("image/") && attachment.url) {
+      images.push({
+        type: "text",
+        text: `Discord image attachment by ${authorName}: ${attachment.url}`,
+      });
+    }
+  }
+
+  return images;
+}
+
+function formatAccountAge(createdAt: Date): string {
+  const months =
+    (new Date().getFullYear() - createdAt.getFullYear()) * 12 +
+    (new Date().getMonth() - createdAt.getMonth());
+
+  if (months < 1) return "less than a month old";
+  if (months < 12) return `${months} months old`;
+  return `${Math.floor(months / 12)} years old`;
+}
+
+function formatTimeAgo(date: Date): string {
+  const diff = Date.now() - date.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} minutes ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hours ago`;
+  return `${Math.floor(hours / 24)} days ago`;
+}
+
+/* ----------------------------- Context Builders ----------------------------- */
+
+function buildServerContext(message: Message): string {
+  if (!message.guild) return "Direct Message";
+
+  const g = message.guild;
+  return [
+    `Server: ${g.name}`,
+    `Members: ${g.memberCount}`,
+    g.createdAt && `Created: ${formatTimeAgo(g.createdAt)}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function buildChannelContext(message: Message): string {
+  const c = message.channel as any;
+  if (!c?.name) return "Direct Message";
+  return `Channel: #${c.name}${c.topic ? ` — ${c.topic}` : ""}`;
+}
+
+function buildUserContext(msg: Message): string {
+  const u = msg.author;
+  const m = msg.member;
+  const name = m?.nickname || u.username;
+
+  return [
+    `User: ${name}`,
+    `Account Age: ${formatAccountAge(u.createdAt)}`,
+    m?.joinedAt && `Joined: ${formatTimeAgo(m.joinedAt)}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function buildMessageContent(msg: Message, isReply = false): MessageContent[] {
+  const authorName = msg.member?.nickname || msg.author.username;
+  const header = isReply
+    ? `Reply from ${authorName}:`
+    : `Prompt from ${authorName}:`;
+
+  const content: MessageContent[] = [];
+
+  if (msg.content) {
+    content.push({
+      type: "text",
+      text: `${header} ${msg.content.slice(0, MAX_CONTEXT_LENGTH)}`,
+    });
+  }
+
+  content.push(...extractImageAttachments(msg));
+  return content;
+}
+
+/* ----------------------------- Message Helpers ------------------------------ */
+
+function splitIntoChunks(text: string): string[] {
+  if (text.length <= MESSAGE_CHUNK_SIZE) return [text];
+  const chunks: string[] = [];
+  let i = 0;
+
+  while (i < text.length) {
+    chunks.push(text.slice(i, i + MESSAGE_CHUNK_SIZE));
+    i += MESSAGE_CHUNK_SIZE;
+  }
+
+  return chunks;
+}
+
+async function sendChunkedMessage(
+  message: Message,
+  text: string,
+  initial?: Message,
+) {
+  const chunks = splitIntoChunks(text);
+  if (initial) {
+    await initial.edit(chunks.shift()!);
+  }
+  for (const chunk of chunks) {
+    if ('send' in message.channel && typeof message.channel.send === 'function') {
+      await message.channel.send(chunk);
+      await new Promise((r) => setTimeout(r, CHUNK_DELAY_MS));
+    }
+  }
+}
+
+/* ---------------------------------- Handler -------------------------------- */
 
 export default {
   name: Events.MessageCreate,
   once: false,
+
   async execute(message: Message, client: Client) {
     if (message.author.bot) return;
 
     const botId = client.user!.id;
-
-    // Check if bot is mentioned
-    const botMentioned =
+    const mentioned =
       message.content.startsWith(`<@${botId}>`) ||
       message.content.startsWith(`<@!${botId}>`);
 
-    if (!botMentioned) return;
+    if (!mentioned && !message.reference?.messageId) return;
 
     const prompt = message.content.replace(/^<@!?(\d+)>/, "").trim();
+    if (!prompt && !message.attachments.size) {
+      return message.reply("Please provide a prompt.");
+    }
 
-    const contextMessages: any[] = [];
+    const rate = await checkRateLimit(message.author.id, message.guildId);
+    if (!rate.allowed) {
+      return message.reply(rate.reason ?? "Rate limited.");
+    }
 
-    // Include replied-to message context if exists
-    if (message.reference?.messageId) {
-      try {
-        const repliedMessage = await message.channel.messages.fetch(
-          message.reference.messageId,
-        );
+    /* -------------------------- Build prompt messages -------------------------- */
 
-        const replyContent: any[] = [];
+    const messages: { role: "system" | "user"; content: string }[] = [];
 
-        // Get author info: username, nickname
-        const authorName =
-          repliedMessage.member?.nickname || repliedMessage.author.username;
-        const authorBio = "No bio available"; // replace with actual bio if you have one
+    messages.push({
+      role: "system",
+      content: [
+        buildServerContext(message),
+        buildChannelContext(message),
+        buildUserContext(message),
+      ].join("\n"),
+    });
 
-        if (repliedMessage.content) {
-          replyContent.push({
-            type: "text",
-            text: `${authorName} (${authorBio}) said: ${repliedMessage.content.slice(
-              0,
-              500,
-            )}`,
-          });
-        }
+    messages.push({
+      role: "user",
+      content: flattenContent(buildMessageContent(message)),
+    });
 
-        // Add images if present
-        repliedMessage.attachments.forEach((attachment: Attachment) => {
-          if (attachment.contentType?.startsWith("image/")) {
-            replyContent.push({
-              type: "image",
-              image: new URL(attachment.url),
-            });
-          }
-        });
+    /* ----------------------------- AI Generation ----------------------------- */
 
-        if (replyContent.length) {
-          contextMessages.push({
-            role: "user",
-            content: replyContent,
-          });
-        }
-      } catch (err) {
-        console.error("Failed to fetch replied message:", err);
+    let replyMsg: Message | null = null;
+    let finalText = "";
+
+    const modelId = await getUserModel(message.author.id, message.guildId);
+    const isReasoning = isReasoningModel(modelId);
+
+    if (isReasoning) {
+      replyMsg = await message.reply("🧠 Grok is reasoning...");
+    }
+
+    const result = streamText({
+      model: xai.responses(modelId),
+      system: INSTRUCTIONS,
+      messages,
+    });
+
+    for await (const chunk of result.textStream) {
+      finalText += chunk;
+      if (!replyMsg && chunk.trim()) {
+        replyMsg = await message.reply(chunk.slice(0, MESSAGE_CHUNK_SIZE));
       }
     }
 
-    // Add the prompt message with author info
-    const promptAuthorName =
-      message.member?.nickname || message.author.username;
-    const promptAuthorBio = "No bio available"; // replace if you store bios
-
-    contextMessages.push({
-      role: "user",
-      content: [
-        {
-          type: "text",
-          text: `${promptAuthorName} (${promptAuthorBio}) asked: ${prompt}`,
-        },
-      ],
-    });
-
-    try {
-      // Typing indicator
-      message.channel.sendTyping();
-
-      // Send a placeholder while generating
-      const thinkingMessage = await message.reply("Grok is thinking...");
-
-      // AI generation
-      const { text } = await generateText({
-        model: xai.responses("grok-4"),
-        messages: contextMessages,
-        instructions:
-          "You are Grok, the AI by xAI. Respond helpfully, concisely, and friendly, taking into account usernames, nicknames, and bios of the message authors.",
-      });
-
-      // Simulate streaming by splitting text into chunks
-      if (text) {
-        const chunkSize = 80; // number of characters per edit
-        let sentText = "";
-        for (let i = 0; i < text.length; i += chunkSize) {
-          sentText += text.slice(i, i + chunkSize);
-          await thinkingMessage.edit(sentText);
-          // small delay to make it feel like streaming
-          await new Promise((r) => setTimeout(r, 250));
-        }
-      } else {
-        await thinkingMessage.edit("Sorry, I couldn't generate a response.");
-      }
-    } catch (err) {
-      console.error("AI generation error:", err);
-      await message.reply("There was an error generating the response.");
+    if (finalText.trim()) {
+      await sendChunkedMessage(message, finalText, replyMsg ?? undefined);
+      recordPromptUsage(message.author.id, message.guildId).catch(() => {});
+    } else {
+      replyMsg?.edit("I couldn’t generate a response.");
     }
   },
 };

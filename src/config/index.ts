@@ -4,7 +4,7 @@ import { ActivityType } from "discord.js";
 export const botToken = Bun.env.BOT_TOKEN;
 export const clientId = Bun.env.CLIENT_ID;
 export const guildId = Bun.env.GUILD_ID;
-export const embedColor = "#0B0F14";
+export const embedColor = "#FFFFFF";
 export const DEVELOPER_ID = "529815278456930314";
 export const COOLDOWN_MS = 3000;
 export const newGuildsChannelId = "1427196989623373874";
@@ -26,3 +26,23 @@ export const STATUS_UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 //-DATABASE-//
 export const DATABASE_URL = Bun.env.DATABASE_URL;
+
+//-XAI API-//
+export const XAI_API_KEY = Bun.env.XAI_API_KEY;
+
+// Validate required environment variables on startup
+if (!botToken) {
+  throw new Error("BOT_TOKEN environment variable is required");
+}
+
+if (!clientId) {
+  throw new Error("CLIENT_ID environment variable is required");
+}
+
+if (!DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable is required");
+}
+
+if (!XAI_API_KEY) {
+  throw new Error("XAI_API_KEY environment variable is required");
+}

@@ -6,6 +6,7 @@
     "discord.js": "^14.25.1",
     "drizzle-kit": "^0.31.8",
     "drizzle-orm": "^0.45.1",
+    "openai": "^6.16.0",
     "pg": "^8.16.3"
   },
   "name": "grokbot",
@@ -16,7 +17,9 @@
     "@types/bun": "latest"
   },
   "scripts": {
-    "dev": "bun --watch src/index.ts"
+    "dev": "bun --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "migrate": "bun run drizzle-kit migrate"
   },
   "peerDependencies": {
     "typescript": "^5"
