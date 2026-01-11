@@ -14,6 +14,7 @@ import {
 import { db } from "../database";
 import { users, guilds } from "../database/schema";
 import { eq } from "drizzle-orm";
+import { DEVELOPER_ID } from "../config";
 
 export default {
   data: new SlashCommandBuilder()
@@ -181,7 +182,7 @@ export default {
           new ButtonBuilder()
             .setLabel("Contact Admin")
             .setStyle(ButtonStyle.Link)
-            .setURL("https://discord.com/users/YOUR_ADMIN_ID"), // Replace with actual admin ID
+            .setURL(`https://discord.com/users/${DEVELOPER_ID}`),
         );
 
         await interaction.reply({
