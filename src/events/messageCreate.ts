@@ -19,6 +19,9 @@ You are replying in Discord and may use all Discord features: Markdown, code blo
 If there are images, reference them in your response using the description or URL, and if you cannot fully interpret them, ask the user for a description.
 Be aware that Discord messages must be 2000 characters or fewer. Shorten or summarize if necessary.
 
+If a message is marked as a reply, the referenced message is conversational context
+and should be treated as the immediately previous turn.
+
 You have access to rich context about:
 - The server/guild you're in
 - The channel you're in
@@ -109,7 +112,7 @@ function buildUserContext(msg: Message): string {
 function buildMessageContent(msg: Message, isReply = false): MessageContent[] {
   const authorName = msg.member?.nickname || msg.author.username;
   const header = isReply
-    ? `Reply from ${authorName}:`
+    ? `Referenced message from ${authorName}:`
     : `Prompt from ${authorName}:`;
 
   const content: MessageContent[] = [];
@@ -123,6 +126,21 @@ function buildMessageContent(msg: Message, isReply = false): MessageContent[] {
 
   content.push(...extractImageAttachments(msg));
   return content;
+}
+
+async function buildReferencedMessageContext(
+  message: Message,
+): Promise<MessageContent[] | null> {
+  if (!message.reference?.messageId) return null;
+
+  try {
+    const referenced = await message.channel.messages.fetch(
+      message.reference.messageId,
+    );
+    return buildMessageContent(referenced, true);
+  } catch {
+    return null;
+  }
 }
 
 /* ----------------------------- Message Helpers ------------------------------ */
@@ -211,6 +229,14 @@ export default {
         buildUserContext(message),
       ].join("\n"),
     });
+
+    const referencedContent = await buildReferencedMessageContext(message);
+    if (referencedContent) {
+      messages.push({
+        role: "user",
+        content: flattenContent(referencedContent),
+      });
+    }
 
     messages.push({
       role: "user",
