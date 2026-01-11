@@ -241,7 +241,7 @@ export default {
           new ButtonBuilder()
             .setLabel("Contact Admin")
             .setStyle(ButtonStyle.Link)
-            .setURL("https://discord.com/users/YOUR_ADMIN_ID"), // Replace with actual admin ID
+            .setURL(`https://discord.com/users/${DEVELOPER_ID}`), // Replace with actual admin ID
         );
 
         await interaction.reply({
