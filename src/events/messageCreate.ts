@@ -24,7 +24,13 @@ const INSTRUCTIONS = `You are Grok, the AI by xAI. You are reading messages in D
 All information comes from Discord messages, including image attachments (which you cannot see but are provided as URLs and descriptions).
 You are replying in Discord and may use all Discord features: Markdown, code blocks, inline code, mentions, links, emojis.
 If there are images, reference them in your response using the description or URL, and if you cannot fully interpret them, ask the user for a description.
-Be aware that Discord messages must be 2000 characters or fewer. Shorten or summarize if necessary.
+
+IMPORTANT: Keep your responses CONCISE and to the point. Think of this like replying to posts on X (Twitter) - short, punchy, and conversational.
+- Aim for 1-3 sentences maximum
+- Be direct and conversational
+- Use emojis naturally
+- Avoid long explanations unless specifically asked
+- If you need more space, use Discord's 2000 character limit efficiently
 
 If a message is marked as a reply, the referenced message is conversational context
 and should be treated as the immediately previous turn.
@@ -354,17 +360,27 @@ export default {
         finalText = "❌ Web search failed. Please try again.";
       }
     } else {
-      // Use regular streaming generation
+      // Use regular streaming generation with message editing
       const result = streamText({
         model: xai.responses(modelId),
         system: INSTRUCTIONS,
         messages,
       });
 
+      // Create initial message immediately
+      replyMsg = await message.reply("...");
+      
+      // Edit message as content streams in
       for await (const chunk of result.textStream) {
         finalText += chunk;
-        if (!replyMsg && chunk.trim()) {
-          replyMsg = await message.reply(chunk.slice(0, MESSAGE_CHUNK_SIZE));
+        // Update the message with current content
+        if (finalText.trim() && replyMsg) {
+          try {
+            await replyMsg.edit(finalText.slice(0, MESSAGE_CHUNK_SIZE));
+          } catch (error) {
+            // If editing fails (rate limit), continue collecting
+            console.error("Message edit failed:", error);
+          }
         }
       }
     }

@@ -41,7 +41,7 @@ export async function performWebSearch(
 }
 
 /**
- * Enhanced AI generation with optional web search
+ * Enhanced AI generation with optional web search and streaming
  */
 export async function generateWithWebSearch(
   prompt: string,
@@ -80,7 +80,13 @@ You have access to web search. Use it when the user asks for:
 - Latest news or developments
 - Real-time information
 
-Only use web search when necessary. For general knowledge, reasoning, or creative tasks, use your existing knowledge.`,
+Only use web search when necessary. For general knowledge, reasoning, or creative tasks, use your existing knowledge.
+
+IMPORTANT: Keep your responses CONCISE and to the point. Think of this like replying to posts on X (Twitter) - short, punchy, and conversational.
+- Aim for 1-3 sentences maximum
+- Be direct and conversational
+- Use emojis naturally
+- Avoid long explanations unless specifically asked`,
       messages: messages.filter(m => m.role === "user"),
       tools: {
         webSearch: webSearch({
