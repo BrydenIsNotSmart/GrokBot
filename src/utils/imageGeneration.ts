@@ -11,7 +11,6 @@ export async function generateImageWithGrok(prompt: string): Promise<any> {
     const { image } = await generateImage({
       model: xai.image("grok-2-image-1212"),
       prompt: prompt,
-      size: "1024x1024",
       n: 1,
     });
 
