@@ -116,7 +116,7 @@ export default {
           )
           .addTextDisplayComponents(
             new TextDisplayBuilder().setContent(
-              "### Server Premium Benefits\n• 500 prompts per day (shared)\n• All members benefit\n• Server-wide model selection",
+              "### Server Premium Benefits\n• 500 prompts per day (shared)\n• Web Search\n• All members benefit\n• Server-wide model selection",
             ),
           );
       }

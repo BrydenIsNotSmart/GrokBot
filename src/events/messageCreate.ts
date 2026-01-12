@@ -42,6 +42,7 @@ You have access to rich context about:
 const MAX_CONTEXT_LENGTH = 500;
 const MESSAGE_CHUNK_SIZE = 2000;
 const CHUNK_DELAY_MS = 150;
+const EDIT_CHUNK_SIZE = 100; // Edit every 100 characters to avoid rate limits
 
 /* -------------------------------- Utilities -------------------------------- */
 
@@ -358,7 +359,7 @@ export default {
         finalText = "❌ Web search failed. Please try again.";
       }
     } else {
-      // Use regular streaming generation with message editing
+      // Use regular streaming generation with chunked message editing
       const result = streamText({
         model: xai.responses(modelId),
         system: INSTRUCTIONS,
@@ -368,17 +369,29 @@ export default {
       // Create initial message immediately
       replyMsg = await message.reply("...");
       
-      // Edit message as content streams in
+      // Edit message in larger chunks to avoid rate limits
+      let lastEditLength = 0;
       for await (const chunk of result.textStream) {
         finalText += chunk;
-        // Update the message with current content
-        if (finalText.trim() && replyMsg) {
+        
+        // Only edit when we've accumulated enough new content
+        if (finalText.length - lastEditLength >= EDIT_CHUNK_SIZE && replyMsg) {
           try {
             await replyMsg.edit(finalText.slice(0, MESSAGE_CHUNK_SIZE));
+            lastEditLength = finalText.length;
           } catch (error) {
-            // If editing fails (rate limit), continue collecting
+            // If editing fails, continue collecting
             console.error("Message edit failed:", error);
           }
+        }
+      }
+      
+      // Final edit to ensure complete message is shown
+      if (replyMsg && finalText.trim()) {
+        try {
+          await replyMsg.edit(finalText.slice(0, MESSAGE_CHUNK_SIZE));
+        } catch (error) {
+          console.error("Final message edit failed:", error);
         }
       }
     }
