@@ -2,6 +2,7 @@ import { boolean, integer, pgTable, varchar, timestamp, primaryKey } from "drizz
 
 export type ServerPremiumTier = "none" | "server_premium";
 export type ResponseFilterLevel = "none" | "relaxed" | "extreme";
+export type WebSearchMode = "disabled" | "enabled" | "auto";
 
 export const guilds = pgTable("guilds", {
   id: varchar().primaryKey().notNull(),
@@ -12,6 +13,7 @@ export const guilds = pgTable("guilds", {
   lastPromptDate: varchar(), // Stored as YYYY-MM-DD string for server-wide tracking
   promptsUsedToday: integer().default(0), // Server-wide prompt count for premium servers
   responseFilter: varchar().default("none"), // "none" | "relaxed" | "extreme"
+  webSearchMode: varchar().default("disabled"), // "disabled" | "enabled" | "auto"
 });
 
 // Table for per-user-per-server cooldowns

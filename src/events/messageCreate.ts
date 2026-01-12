@@ -3,11 +3,12 @@ import { xai } from "@ai-sdk/xai";
 import { streamText } from "ai";
 import { checkRateLimit, recordPromptUsage } from "../utils/rateLimit";
 import { getUserModel, isReasoningModel, isImageGenerationModel } from "../utils/models";
+import { generateWithWebSearch } from "../utils/webSearch";
 import { db } from "../database";
 import { guilds } from "../database/schema";
 import { eq } from "drizzle-orm";
 import { filterResponse } from "../utils/contentFilter";
-import type { ResponseFilterLevel } from "../database/schema/guilds";
+import type { ResponseFilterLevel, WebSearchMode } from "../database/schema/guilds";
 import { generateImageWithGrok, validateImagePrompt } from "../utils/imageGeneration";
 
 /* ---------------------------------- Types --------------------------------- */
@@ -255,6 +256,32 @@ export default {
     const isReasoning = isReasoningModel(modelId);
     const isImageGen = isImageGenerationModel(modelId);
 
+    // Check web search settings
+    let webSearchMode: WebSearchMode = "disabled";
+    let enableWebSearch = false;
+
+    if (message.guildId) {
+      const guild = await db.query.guilds.findFirst({
+        where: eq(guilds.id, message.guildId),
+      });
+      webSearchMode = (guild?.webSearchMode as WebSearchMode) || "disabled";
+      
+      // Enable web search based on mode
+      if (webSearchMode === "enabled") {
+        enableWebSearch = true;
+      } else if (webSearchMode === "auto") {
+        // For auto mode, let the AI decide based on the prompt
+        // We'll check for keywords that suggest current information is needed
+        const currentInfoKeywords = [
+          "latest", "recent", "current", "news", "today", "now", "price", "stock",
+          "weather", "breaking", "update", "happening", "released", "announced"
+        ];
+        enableWebSearch = currentInfoKeywords.some(keyword => 
+          prompt.toLowerCase().includes(keyword)
+        );
+      }
+    }
+
     // Handle image generation
     if (isImageGen) {
       const cleanPrompt = prompt.replace(/^<@!?(\d+)>/, "").trim();
@@ -309,16 +336,36 @@ export default {
       replyMsg = await message.reply("🧠 Grok is reasoning...");
     }
 
-    const result = streamText({
-      model: xai.responses(modelId),
-      system: INSTRUCTIONS,
-      messages,
-    });
+    // Use web search if enabled
+    if (enableWebSearch) {
+      replyMsg = replyMsg || await message.reply("🔍 Searching the web...");
+      
+      const searchResult = await generateWithWebSearch(
+        prompt,
+        messages,
+        modelId,
+        true
+      );
 
-    for await (const chunk of result.textStream) {
-      finalText += chunk;
-      if (!replyMsg && chunk.trim()) {
-        replyMsg = await message.reply(chunk.slice(0, MESSAGE_CHUNK_SIZE));
+      if (searchResult.success) {
+        finalText = searchResult.result || "";
+      } else {
+        console.error("Web search failed:", searchResult.error);
+        finalText = "❌ Web search failed. Please try again.";
+      }
+    } else {
+      // Use regular streaming generation
+      const result = streamText({
+        model: xai.responses(modelId),
+        system: INSTRUCTIONS,
+        messages,
+      });
+
+      for await (const chunk of result.textStream) {
+        finalText += chunk;
+        if (!replyMsg && chunk.trim()) {
+          replyMsg = await message.reply(chunk.slice(0, MESSAGE_CHUNK_SIZE));
+        }
       }
     }
 
