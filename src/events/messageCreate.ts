@@ -270,8 +270,21 @@ export default {
         const imageFile = await generateImageWithGrok(cleanPrompt);
         
         // Send the image as an attachment
+        // Convert the image data to a Buffer if needed
+        let attachmentData;
+        if (typeof imageFile === 'string') {
+          // If it's a URL, Discord can handle it directly
+          attachmentData = imageFile;
+        } else if (imageFile instanceof Buffer) {
+          // If it's already a Buffer
+          attachmentData = imageFile;
+        } else {
+          // Handle other formats (might be base64 or object)
+          attachmentData = Buffer.from(imageFile);
+        }
+        
         const attachment = {
-          attachment: imageFile,
+          attachment: attachmentData,
           name: 'generated-image.png'
         };
         
