@@ -60,6 +60,12 @@ export const AVAILABLE_MODELS = [
     description: "High-quality reasoning model. 131K context, 600 rpm.",
     default: false,
   },
+  {
+    id: "grok-2-image-1212",
+    name: "Grok 2 Image (1212)",
+    description: "AI image generation model. Creates images from text prompts. Premium only.",
+    default: false,
+  },
 ] as const;
 
 export type ModelId = (typeof AVAILABLE_MODELS)[number]["id"];
@@ -71,6 +77,13 @@ export function isReasoningModel(modelId: ModelId): boolean {
   return modelId.includes("reasoning") || 
          modelId === "grok-3" || 
          modelId === "grok-4-0709";
+}
+
+/**
+ * Checks if a model is an image generation model
+ */
+export function isImageGenerationModel(modelId: ModelId): boolean {
+  return modelId === "grok-2-image-1212";
 }
 
 /**

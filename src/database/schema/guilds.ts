@@ -1,6 +1,7 @@
 import { boolean, integer, pgTable, varchar, timestamp, primaryKey } from "drizzle-orm/pg-core";
 
 export type ServerPremiumTier = "none" | "server_premium";
+export type ResponseFilterLevel = "none" | "relaxed" | "extreme";
 
 export const guilds = pgTable("guilds", {
   id: varchar().primaryKey().notNull(),
@@ -10,6 +11,7 @@ export const guilds = pgTable("guilds", {
   premiumTier: varchar().default("none"), // "none" | "server_premium"
   lastPromptDate: varchar(), // Stored as YYYY-MM-DD string for server-wide tracking
   promptsUsedToday: integer().default(0), // Server-wide prompt count for premium servers
+  responseFilter: varchar().default("none"), // "none" | "relaxed" | "extreme"
 });
 
 // Table for per-user-per-server cooldowns

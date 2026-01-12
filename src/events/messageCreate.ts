@@ -2,7 +2,13 @@ import { Client, Events, Message } from "discord.js";
 import { xai } from "@ai-sdk/xai";
 import { streamText } from "ai";
 import { checkRateLimit, recordPromptUsage } from "../utils/rateLimit";
-import { getUserModel, isReasoningModel } from "../utils/models";
+import { getUserModel, isReasoningModel, isImageGenerationModel } from "../utils/models";
+import { db } from "../database";
+import { guilds } from "../database/schema";
+import { eq } from "drizzle-orm";
+import { filterResponse } from "../utils/contentFilter";
+import type { ResponseFilterLevel } from "../database/schema/guilds";
+import { generateImageWithGrok, validateImagePrompt } from "../utils/imageGeneration";
 
 /* ---------------------------------- Types --------------------------------- */
 
@@ -245,11 +251,46 @@ export default {
 
     /* ----------------------------- AI Generation ----------------------------- */
 
-    let replyMsg: Message | null = null;
-    let finalText = "";
-
     const modelId = await getUserModel(message.author.id, message.guildId);
     const isReasoning = isReasoningModel(modelId);
+    const isImageGen = isImageGenerationModel(modelId);
+
+    // Handle image generation
+    if (isImageGen) {
+      const cleanPrompt = prompt.replace(/^<@!?(\d+)>/, "").trim();
+      
+      if (!validateImagePrompt(cleanPrompt)) {
+        return message.reply("❌ Invalid image prompt. Please provide a descriptive prompt between 3-1000 characters.");
+      }
+
+      let replyMsg: Message | null = null;
+      try {
+        replyMsg = await message.reply("🎨 Generating image...");
+        
+        const imageFile = await generateImageWithGrok(cleanPrompt);
+        
+        // Send the image as an attachment
+        const attachment = {
+          attachment: imageFile,
+          name: 'generated-image.png'
+        };
+        
+        await replyMsg.edit({
+          content: `🎨 **Generated Image**\n**Prompt:** ${cleanPrompt}`,
+          files: [attachment]
+        });
+        
+        recordPromptUsage(message.author.id, message.guildId).catch(() => {});
+      } catch (error) {
+        console.error("Image generation error:", error);
+        await replyMsg?.edit("❌ Failed to generate image. Please try again.");
+      }
+      return;
+    }
+
+    // Handle text generation
+    let replyMsg: Message | null = null;
+    let finalText = "";
 
     if (isReasoning) {
       replyMsg = await message.reply("🧠 Grok is reasoning...");
@@ -268,11 +309,23 @@ export default {
       }
     }
 
+    // Apply content filtering if enabled for this server
+    if (message.guildId) {
+      const guild = await db.query.guilds.findFirst({
+        where: eq(guilds.id, message.guildId),
+      });
+      
+      const filterLevel = (guild?.responseFilter || "none") as ResponseFilterLevel;
+      if (filterLevel !== "none") {
+        finalText = filterResponse(finalText, filterLevel);
+      }
+    }
+
     if (finalText.trim()) {
       await sendChunkedMessage(message, finalText, replyMsg ?? undefined);
       recordPromptUsage(message.author.id, message.guildId).catch(() => {});
     } else {
-      replyMsg?.edit("I couldn’t generate a response.");
+      replyMsg?.edit("I couldn't generate a response.");
     }
   },
 };
